@@ -3,3 +3,7 @@ emulator
 
 # C specific stuff
 core
+
+# VS Code specific stuff
+.vscode/
+.VSCodeCounter/

@@ -1,0 +1,18 @@
+"0.6.2" "0.6.2"
+Setting PYTHONHOME = "/tmp/.mount_cutteroJ5vdG/usr"  for AppImage.
+PYTHONHOME = "/tmp/.mount_cutteroJ5vdG/usr"
+ERROR: rz_sys_dlopen: error: /tmp/.mount_cutteroJ5vdG/usr/lib/rizin/plugins/librz_yara.so (libcrypto.so.1.1: cannot open shared object file: No such file or directory)
+Plugins are loaded from "/home/mxd007/.local/share/rizin/cutter/plugins"
+Native plugins are loaded from "/home/mxd007/.local/share/rizin/cutter/plugins/native"
+Python plugins are loaded from "/home/mxd007/.local/share/rizin/cutter/plugins/python"
+Loaded 0 plugin(s).
+Plugins are loaded from "/tmp/.mount_cutteroJ5vdG/usr/share/plasma/rizin/cutter/plugins"
+Plugins are loaded from "/tmp/.mount_cutteroJ5vdG/usr/share/gnome/rizin/cutter/plugins"
+Plugins are loaded from "/home/mxd007/.local/share/flatpak/exports/share/rizin/cutter/plugins"
+Plugins are loaded from "/var/lib/flatpak/exports/share/rizin/cutter/plugins"
+Plugins are loaded from "/tmp/.mount_cutteroJ5vdG/usr/local/share/rizin/cutter/plugins"
+Plugins are loaded from "/tmp/.mount_cutteroJ5vdG/usr/share/rizin/cutter/plugins"
+Native plugins are loaded from "/tmp/.mount_cutteroJ5vdG/usr/share/rizin/cutter/plugins/native"
+Load Error for plugin "libcutter_yara_plugin.so" : "Cannot load library /tmp/.mount_cutteroJ5vdG/usr/share/rizin/cutter/plugins/native/libcutter_yara_plugin.so: (librz_yara.so: cannot open shared object file: No such file or directory)"
+Loaded 1 plugin(s).
+Plugins are loaded from "/var/lib/snapd/desktop/rizin/cutter/plugins"
