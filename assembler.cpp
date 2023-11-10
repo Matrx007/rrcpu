@@ -1,5 +1,3 @@
-#include <cstdint>
-#include <cstdlib>
 #include <stdio.h>
 #include <variant>
 #include <vector>
@@ -29,6 +27,33 @@ std::map<std::string, uint8_t> register_names = {
 };
 
 
+std::map<std::string, uint8_t> instrsuction_names = {
+    { "NOOP",   0xff },
+    { "HALT",   0x00 },
+    { "MVI",    0x01 },
+    { "MOV",    0x02 },
+    { "ADD",    0x03 },
+    { "ADDI",   0x04 },
+    { "SHFL",   0x05 },
+    { "SHFR",   0x06 },
+    { "SUB",    0x07 },
+    { "SUBI",   0x08 },
+    { "LDA",    0x20 },
+    { "STA",    0x21 },
+    { "JMP",    0x40 },
+    { "JMPZ",   0x41 },
+    { "JMPE",   0x42 },
+    { "JMPI",   0x43 },
+    { "JMPR",   0x44 },
+    { "JMPL",   0x43 },
+    { "JMPS",   0x43 },
+    { "OUT",    0xe0 },
+    { "OUTI",   0xe1 },
+    { "IN",     0xf0 },
+    { "INV",    0xf1 },
+};
+
+
 
 
 template<typename T2, typename T1>
@@ -50,7 +75,10 @@ public:
 
     FILE* file;
 
-    Eater(FILE* file) : file(file) {
+    Eater() {}
+
+    void init(FILE* file) {
+        this->file = file;
         next();
     }
 
@@ -76,6 +104,23 @@ public:
     }
 
     // Special functions
+
+    bool skipSeparator() {
+        bool gotSeparator = false;
+        if(nextc == ' ' || nextc == '\t') {
+            gotSeparator = true;
+        }
+
+        while(nextc == ' ' || nextc == '\t') {
+            next();
+        }
+
+        return gotSeparator;
+    }
+
+    bool isSeparator() {
+        return (nextc == ' ' || nextc == '\t');
+    }
 
     bool skipWhitespace() {
         bool gotWhitespace = false;
@@ -126,6 +171,10 @@ struct BINARY_BLOCK {
         labels[label] = index;
     }
 
+    void addBinaryBlock(BINARY_BLOCK* binaryBlock) {
+        blocks.push_back(binaryBlock);
+    }
+
     void addReference(std::string label) {
         uint32_t index = blocks.size();
         blocks.push_back((uint8_t) 0);
@@ -152,6 +201,17 @@ struct BINARY_BLOCK {
             blocks[p.first + 3] = bytes[3];
         }
     }
+
+
+
+
+
+
+    
+
+
+
+
 };
 
 
@@ -160,7 +220,7 @@ struct BINARY_BLOCK {
 
 
 std::vector<BINARY_BLOCK> file;
-Eater eater = Eater(NULL);
+Eater eater;
 
 
 std::optional<std::string> parseLabel() {
@@ -180,12 +240,14 @@ std::optional<std::string> parseLabel() {
         std::exit(1);
     }
 
+    printf("got label: '%s'\n", label.c_str());
+
     return label;
 }
 
 
 
-BLOCK parseArg() {
+BINARY_BLOCK* parseArg() {
     if(eater.eat('$')) {
         std::string name;
         while(eater.peek() >= 'A' && eater.peek() <= 'Z') {
@@ -197,7 +259,12 @@ BLOCK parseArg() {
             std::exit(1);
         }
 
-        return { register_names[name] };
+        BINARY_BLOCK* binaryBlock = new BINARY_BLOCK();
+        binaryBlock->addByte(register_names[name]);
+
+        printf("got register: '%s'\n", name.c_str());
+        
+        return binaryBlock;
     }
 
     else if(eater.eat(':')) {
@@ -216,7 +283,9 @@ BLOCK parseArg() {
     else {
         std::string txt;
         while(!eater.isWhitespace()) {
-            txt.push_back(eater.next());
+            const char c = eater.next();
+            printf("parsing: '%c'\n", c);
+            txt.push_back(c);
         }
         if(txt.length() < 3) {
             printf("ERR: Invalid literal: %s\n", txt.c_str());
@@ -246,16 +315,74 @@ BLOCK parseArg() {
             binaryBlock->addByte((v >> 16) & 0xFF);
             binaryBlock->addByte((v >> 24) & 0xFF);
         }
+        else {
+            printf("ERR: Invalid literal\n");
+            std::exit(1);
+        }
 
         return { binaryBlock };
     }
 }
 
 
-void parseInstruction() {
+BINARY_BLOCK* parseInstruction() {
     std::optional<std::string> label = parseLabel();
+    eater.skipWhitespace();
+
+    std::string instruction;
+
+    if(eater.peek() < 'A' || eater.peek() > 'Z') {
+        return 0;
+    }
+
+    while(eater.peek() >= 'A' && eater.peek() <= 'Z') {
+        instruction.push_back(eater.next());
+    }
+
+    if(!instrsuction_names.contains(instruction)) {
+        printf("ERR: Unknown instructions: %s\n", instruction.c_str());
+        std::exit(1);
+    }
+
+    BINARY_BLOCK* binaryBlock = new BINARY_BLOCK();
+
+    if(label.has_value()) {
+        binaryBlock->addByte(instrsuction_names[instruction], *label);
+    } else {
+        binaryBlock->addByte(instrsuction_names[instruction]);
+    }
+
+    printf("got instruction: '%s'\n", instruction.c_str());
+
+    while(!eater.eat('\n')) {
+        if(!eater.skipSeparator()) {
+            printf("ERR: Invalid state, should've gotten whitespace\n");
+            std::exit(1);
+        }
+        binaryBlock->addBinaryBlock(parseArg());
+    }
+
+    return binaryBlock;
+}
 
 
+int main(int argc, const char* argv[]) {
+    if(argc < 2) {
+        printf("ERR: Use syntax: assembler <asm file>\n");
+        return 1;
+    }
+
+    printf("opening file: %s\n", argv[1]);
+    eater.init(fopen(argv[1], "r"));
+
+    BINARY_BLOCK binaryBlock;
+    
+
+    while(eater.peek() != EOF) {
+        BINARY_BLOCK* bb = parseInstruction();
+        if(!bb) break;
+        binaryBlock.addBinaryBlock(bb);
+    }
 }
 
 
