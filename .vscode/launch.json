@@ -15,6 +15,17 @@
                 "debug"
             ],
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Assembler",
+            "program": "${workspaceFolder}/assembler",
+            "args": [
+                "test.asm",
+                "out.mem"
+            ],
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

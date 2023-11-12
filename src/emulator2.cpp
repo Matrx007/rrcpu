@@ -2,9 +2,13 @@
 #include <functional>
 #include <stdio.h>
 #include <unordered_map>
+#include <map>
 #include <cstdint>
 #include <inttypes.h>
 #include <variant>
+#include <bit>
+
+
 
 bool debug = false;
 
@@ -20,6 +24,8 @@ typedef enum __attribute__((packed)) REG {
     REG_B = 0xBB,
     REG_C = 0xCC,
     REG_D = 0xDD,
+    REG_E = 0xEE,
+    REG_F = 0xFF,
 
     REG_CA = 0xCA,
     REG_CB = 0xCB,
@@ -27,6 +33,10 @@ typedef enum __attribute__((packed)) REG {
     REG_PC = 0x8c,
     REG_MAR = 0x8a,
     REG_MDR = 0x8d,
+
+    REG_SS = 0x60,
+    REG_SP = 0x61,
+    REG_SF = 0x62,
 } REG;
 
 typedef union __attribute__((packed)) IMMEDIATE {
@@ -55,11 +65,13 @@ public:
     MetaRegister(REG_SIZE size, bool generalPurpose) : size(size), generalPurpose(generalPurpose) {}
 };
 
-std::unordered_map<REG, MetaRegister> REGISTERS_META = {
+std::map<REG, MetaRegister> REGISTERS_META = {
     { REG_A, MetaRegister(U32, true) },
     { REG_B, MetaRegister(U32, true) },
     { REG_C, MetaRegister(U32, true) },
     { REG_D, MetaRegister(U32, true) },
+    { REG_E, MetaRegister(U32, true) },
+    { REG_F, MetaRegister(U32, true) },
 
     { REG_CA, MetaRegister(U8, true) },
     { REG_CB, MetaRegister(U8, true) },
@@ -67,9 +79,21 @@ std::unordered_map<REG, MetaRegister> REGISTERS_META = {
     { REG_PC, MetaRegister(U32, false) },
     { REG_MAR, MetaRegister(U32, false) },
     { REG_MDR, MetaRegister(U8, false) },
+
+    { REG_SS, MetaRegister(U32, false) },
+    { REG_SP, MetaRegister(U32, false) },
+    { REG_SF, MetaRegister(U32, false) },
 };
 
-
+uint32_t getRegTotalSize() {
+    static uint32_t regTotalSize = 0;
+    if(regTotalSize == 0) {
+        for(auto pair : REGISTERS_META) {
+            regTotalSize += pair.second.size;
+        }
+    }
+    return regTotalSize;
+}
 
 struct REGISTER {
 public:
@@ -209,9 +233,23 @@ public:
         }
     }
 
+    void rotl(uint8_t val) {
+        switch (meta.size) {
+        case U8: value.u8 = std::rotl(value.u8, val); break;
+        case U16: value.u16 = std::rotl(value.u16, val); break;
+        case U32: value.u32 = std::rotl(value.u32, val); break;
+        }
+    }
+
+    void rotr(uint8_t val) {
+        switch (meta.size) {
+        case U8: value.u8 = std::rotr(value.u8, val); break;
+        case U16: value.u16 = std::rotr(value.u16, val); break;
+        case U32: value.u32 = std::rotr(value.u32, val); break;
+        }
+    }
+
 };
-
-
 
 
 
@@ -342,6 +380,57 @@ typedef struct __attribute__((packed)) WIN_SUBI : WIN {
     uint32_t size() { return sizeof(REG) + REGISTERS_META[dest].size; }
 } WIN_SUBI;
 
+typedef struct __attribute__((packed)) WIN_ROTL : WIN {
+    REG reg;
+    uint8_t chr;
+    uint32_t size() { return sizeof(*this); }
+} WIN_ROTL;
+
+typedef struct __attribute__((packed)) WIN_ROTR : WIN {
+    REG reg;
+    uint8_t chr;
+    uint32_t size() { return sizeof(*this); }
+} WIN_ROTR;
+
+typedef struct __attribute__((packed)) WIN_CALL : WIN {
+    uint32_t addr;
+    uint32_t size() { return sizeof(*this); }
+} WIN_CALL;
+
+typedef struct __attribute__((packed)) WIN_PUSH : WIN {
+    REG reg;
+    uint32_t size() { return sizeof(*this); }
+} WIN_PUSH;
+
+typedef struct __attribute__((packed)) WIN_POP : WIN {
+    REG reg;
+    uint32_t size() { return sizeof(*this); }
+} WIN_POP;
+
+typedef struct __attribute__((packed)) WIN_GARG : WIN {
+    REG reg;
+    uint32_t offset;
+    uint32_t size() { return sizeof(*this); }
+} WIN_GARG;
+
+typedef struct __attribute__((packed)) WIN_SARG : WIN {
+    REG reg;
+    uint32_t offset;
+    uint32_t size() { return sizeof(*this); }
+} WIN_SARG;
+
+typedef struct __attribute__((packed)) WIN_GLOC : WIN {
+    REG reg;
+    uint32_t offset;
+    uint32_t size() { return sizeof(*this); }
+} WIN_GLOC;
+
+typedef struct __attribute__((packed)) WIN_SLOC : WIN {
+    REG reg;
+    uint32_t offset;
+    uint32_t size() { return sizeof(*this); }
+} WIN_SLOC;
+
 
 
 
@@ -377,6 +466,185 @@ struct MACHINE {
 
     MACHINE(uint8_t* memory) : memory(memory) {}
 };
+
+
+
+
+
+// #########################
+// Stack
+// #########################
+
+void pushRegister(MACHINE* machine, CORE* core, REG reg, bool log = true) {
+    const uint32_t sp = core->registers[REG_SP].to_u32();
+    if(log) printf("pushed register %x to: %d (0x%x)\n", reg, sp, sp);
+    switch (REGISTERS_META[reg].size) {
+        case U8: {
+            machine->memory[sp] = core->registers[reg].value.u8;
+            core->registers[REG_SP].subtract(1);
+            break;
+        }
+
+        case U16: {
+            machine->memory[sp - 1] = (core->registers[reg].value.u16 >> 0) & 0xFF;
+            machine->memory[sp - 0] = (core->registers[reg].value.u16 >> 8) & 0xFF;
+            core->registers[REG_SP].subtract(2);
+            break;
+        }
+
+        case U32: {
+            machine->memory[sp - 3] = (core->registers[reg].value.u32 >> 0) & 0xFF;
+            machine->memory[sp - 2] = (core->registers[reg].value.u32 >> 8) & 0xFF;
+            machine->memory[sp - 1] = (core->registers[reg].value.u32 >> 16) & 0xFF;
+            machine->memory[sp - 0] = (core->registers[reg].value.u32 >> 24) & 0xFF;
+            core->registers[REG_SP].subtract(4);
+            break;
+        }
+    }
+}
+
+void popRegister(MACHINE* machine, CORE* core, REG reg, bool log = true) {
+    core->registers[REG_SP].add(1);
+    const uint32_t sp = core->registers[REG_SP].to_u32();
+    if(log) printf("popped register %x from: %d (0x%x)\n", reg, sp, sp);
+
+    switch (REGISTERS_META[reg].size) {
+        case U8: {
+            core->registers[reg].value.u8 = machine->memory[sp];
+            break;
+        }
+
+        case U16: {
+            core->registers[reg].value.u16 = 0;
+            core->registers[reg].value.u16 |= ((uint16_t) machine->memory[sp + 0]) << 0;
+            core->registers[reg].value.u16 |= ((uint16_t) machine->memory[sp + 1]) << 8;
+            core->registers[REG_SP].add(1);
+            break;
+        }
+
+        case U32: {
+            core->registers[reg].value.u32 = 0;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 0]) << 0;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 1]) << 8;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 2]) << 16;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 3]) << 24;
+            core->registers[REG_SP].add(3);
+            break;
+        }
+    }
+}
+
+void getArg(MACHINE* machine, CORE* core, REG reg, uint32_t offset) {
+    const uint32_t sp = core->registers[REG_SF].to_u32() + getRegTotalSize() + offset + 1;
+    printf("getting arg from: %d (0x%x)\n", sp, sp);
+    
+    switch (REGISTERS_META[reg].size) {
+        case U8: {
+            core->registers[reg].value.u8 = machine->memory[sp];
+            break;
+        }
+
+        case U16: {
+            core->registers[reg].value.u16 = 0;
+            core->registers[reg].value.u16 |= ((uint16_t) machine->memory[sp + 0]) << 0;
+            core->registers[reg].value.u16 |= ((uint16_t) machine->memory[sp + 1]) << 8;
+            core->registers[REG_SP].add(1);
+            break;
+        }
+
+        case U32: {
+            core->registers[reg].value.u32 = 0;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 0]) << 0;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 1]) << 8;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 2]) << 16;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 3]) << 24;
+            core->registers[REG_SP].add(3);
+            break;
+        }
+    }
+}
+
+void setArg(MACHINE* machine, CORE* core, REG reg, uint32_t offset) {
+    const uint32_t sp = core->registers[REG_SF].to_u32() + getRegTotalSize() + offset + 1;
+    printf("setting arg to: %d (0x%x)\n", sp, sp);
+    
+    switch (REGISTERS_META[reg].size) {
+        case U8: {
+            machine->memory[sp] = core->registers[reg].value.u8;
+            break;
+        }
+
+        case U16: {
+            machine->memory[sp - 1] = (core->registers[reg].value.u16 >> 0) & 0xFF;
+            machine->memory[sp - 0] = (core->registers[reg].value.u16 >> 8) & 0xFF;
+            break;
+        }
+
+        case U32: {
+            machine->memory[sp - 3] = (core->registers[reg].value.u32 >> 0) & 0xFF;
+            machine->memory[sp - 2] = (core->registers[reg].value.u32 >> 8) & 0xFF;
+            machine->memory[sp - 1] = (core->registers[reg].value.u32 >> 16) & 0xFF;
+            machine->memory[sp - 0] = (core->registers[reg].value.u32 >> 24) & 0xFF;
+            break;
+        }
+    }
+}
+
+void getLocal(MACHINE* machine, CORE* core, REG reg, uint32_t offset) {
+    const uint32_t sp = core->registers[REG_SF].to_u32() - offset;
+    printf("getting local from: %d (0x%x)\n", sp, sp);
+    
+    switch (REGISTERS_META[reg].size) {
+        case U8: {
+            core->registers[reg].value.u8 = machine->memory[sp];
+            break;
+        }
+
+        case U16: {
+            core->registers[reg].value.u16 = 0;
+            core->registers[reg].value.u16 |= ((uint16_t) machine->memory[sp + 0]) << 0;
+            core->registers[reg].value.u16 |= ((uint16_t) machine->memory[sp + 1]) << 8;
+            core->registers[REG_SP].add(1);
+            break;
+        }
+
+        case U32: {
+            core->registers[reg].value.u32 = 0;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 0]) << 0;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 1]) << 8;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 2]) << 16;
+            core->registers[reg].value.u32 |= ((uint32_t) machine->memory[sp + 3]) << 24;
+            core->registers[REG_SP].add(3);
+            break;
+        }
+    }
+}
+
+void setLocal(MACHINE* machine, CORE* core, REG reg, uint32_t offset) {
+    const uint32_t sp = core->registers[REG_SF].to_u32() - offset;
+    printf("setting local to: %d (0x%x)\n", sp, sp);
+    
+    switch (REGISTERS_META[reg].size) {
+        case U8: {
+            machine->memory[sp] = core->registers[reg].value.u8;
+            break;
+        }
+
+        case U16: {
+            machine->memory[sp - 1] = (core->registers[reg].value.u16 >> 0) & 0xFF;
+            machine->memory[sp - 0] = (core->registers[reg].value.u16 >> 8) & 0xFF;
+            break;
+        }
+
+        case U32: {
+            machine->memory[sp - 3] = (core->registers[reg].value.u32 >> 0) & 0xFF;
+            machine->memory[sp - 2] = (core->registers[reg].value.u32 >> 8) & 0xFF;
+            machine->memory[sp - 1] = (core->registers[reg].value.u32 >> 16) & 0xFF;
+            machine->memory[sp - 0] = (core->registers[reg].value.u32 >> 24) & 0xFF;
+            break;
+        }
+    }
+}
 
 // #########################
 // Instruction abstractions
@@ -486,6 +754,26 @@ std::unordered_map<uint8_t, CLKFunction> opcodeToCLKFunction = {
 
         WIN_SUBI* window = (WIN_SUBI*)mem;
         core->registers[window->dest].subtract(window->val);
+
+        core->skip_args(window->size());
+    }},
+
+    // ROTL
+    { 0x09, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: ROTL\n");
+
+        WIN_ROTL* window = (WIN_ROTL*)mem;
+        core->registers[window->reg].rotl(window->chr);
+
+        core->skip_args(window->size());
+    }},
+
+    // ROTR
+    { 0x0a, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: ROTR\n");
+
+        WIN_ROTR* window = (WIN_ROTR*)mem;
+        core->registers[window->reg].rotr(window->chr);
 
         core->skip_args(window->size());
     }},
@@ -624,6 +912,111 @@ std::unordered_map<uint8_t, CLKFunction> opcodeToCLKFunction = {
         core->skip_args(window->size());
     }},
 
+    // ========== 0x60 STACK
+
+    // PUSH
+    { 0x60, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: PUSH\n");
+
+        WIN_PUSH* window = (WIN_PUSH*)mem;
+
+        pushRegister(machine, core, window->reg);
+        
+        core->skip_args(window->size());
+    }},
+
+    // POP
+    { 0x61, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: POP\n");
+
+        WIN_POP* window = (WIN_POP*)mem;
+
+        popRegister(machine, core, window->reg);
+        
+        core->skip_args(window->size());
+    }},
+
+
+
+    // GARG
+    { 0x62, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: GARG\n");
+
+        WIN_GARG* window = (WIN_GARG*)mem;
+
+        getArg(machine, core, window->reg, window->offset);
+        
+        core->skip_args(window->size());
+    }},
+    // SARG
+    { 0x63, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: SARG\n");
+
+        WIN_SARG* window = (WIN_SARG*)mem;
+
+        setArg(machine, core, window->reg, window->offset);
+        
+        core->skip_args(window->size());
+    }},
+
+
+
+    // GLOC
+    { 0x64, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: GLOC\n");
+
+        WIN_GLOC* window = (WIN_GLOC*)mem;
+
+        getLocal(machine, core, window->reg, window->offset);
+        
+        core->skip_args(window->size());
+    }},
+    // SLOC
+    { 0x65, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: SLOC\n");
+
+        WIN_SLOC* window = (WIN_SLOC*)mem;
+
+        setLocal(machine, core, window->reg, window->offset);
+        
+        core->skip_args(window->size());
+    }},
+
+
+
+    // CALL
+    { 0x6e, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: CALL\n");
+
+        WIN_CALL* window = (WIN_CALL*)mem;
+        
+        core->skip_args(window->size());
+        
+        for(auto pair : REGISTERS_META) {
+            pushRegister(machine, core, pair.first, false);
+            printf("    push %x = %d (0x%x)\n", pair.first, core->registers[pair.first].to_u32(), core->registers[pair.first].to_u32());
+        }
+
+        core->registers[REG_SF].value.u32 = core->registers[REG_SP].value.u32;
+        printf("call: stack frame: %d (0x%x)\n", core->registers[REG_SF].value.u32, core->registers[REG_SF].value.u32);
+
+        core->registers[REG_PC].value.u32 = window->addr;
+    }},
+
+    // RET
+    { 0x6f, [](MACHINE* machine, CORE* core, uint8_t* mem) {
+        if(debug) printf("IN: RET\n");
+
+        core->registers[REG_SP].value.u32 = core->registers[REG_SF].value.u32;
+        
+        for(auto iter = REGISTERS_META.rbegin(); iter != REGISTERS_META.rend(); ++iter) {
+            popRegister(machine, core, iter->first, false);
+            printf("    pop %x = %d (0x%x)\n", iter->first, core->registers[iter->first].to_u32(), core->registers[iter->first].to_u32());
+        }
+
+        printf("ret: stack frame: %d (0x%x)\n", core->registers[REG_SF].value.u32, core->registers[REG_SF].value.u32);
+    }},
+
     // ========== 0xe0-0xf0 IO/HID
 
     // OUT
@@ -684,6 +1077,10 @@ void CORE::clock(MACHINE* machine) {
     uint8_t* relative_memory = &machine->memory[pc + 1];
     uint8_t instruction = machine->memory[pc];
 
+    if(!opcodeToCLKFunction.contains(instruction)) {
+        printf("ERR: No such instruction: %d (0x%x)\n", instruction, instruction);
+        std::exit(1);
+    }
     opcodeToCLKFunction[instruction](machine, this, relative_memory);
 }
 
@@ -739,7 +1136,13 @@ int main(int argc, char** argv) {
             v = machine.core0.registers[REG_MAR].value.u32;
             printf("REG_MAR: %d (%x), ", v, v);
             v = machine.core0.registers[REG_MDR].value.u8;
-            printf("REG_MDR: %d (%x)\n", v, v);
+            printf("REG_MDR: %d (%x), ", v, v);
+            v = machine.core0.registers[REG_SS].value.u32;
+            printf("REG_SS: %d (%x), ", v, v);
+            v = machine.core0.registers[REG_SP].value.u32;
+            printf("REG_SP: %d (%x), ", v, v);
+            v = machine.core0.registers[REG_SF].value.u32;
+            printf("REG_SF: %d (%x)\n", v, v);
         }
     }
 
